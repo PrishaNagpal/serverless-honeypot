@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Serverless honeypot - core resources
+
+Parameters:
+  AlertEmail:
+    Type: String
+    Description: Email address that receives honeypot alerts
+
+Resources:
+  HitsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: honeypot-hits
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+        - { AttributeName: gsi1pk, AttributeType: S }
+        - { AttributeName: gsi1sk, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: new-visitors
+          KeySchema:
+            - { AttributeName: gsi1pk, KeyType: HASH }
+            - { AttributeName: gsi1sk, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: honeypot-alerts
+
+  AlertSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  DecoyAdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: honeypot-decoy-admin-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: decoy-admin-permissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: WriteHits
+                Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt HitsTable.Arn
+              - Sid: AlertOnHit
+                Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref AlertTopic
+              - Sid: OwnLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/honeypot-decoy-admin:*'
+  DecoyAdminLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/honeypot-decoy-admin
+      RetentionInDays: 14
+
+  DecoyAdminFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: DecoyAdminLogGroup
+    Properties:
+      FunctionName: honeypot-decoy-admin
+      Runtime: python3.12
+      Handler: app.lambda_handler
+      Role: !GetAtt DecoyAdminRole.Arn
+      Code: src/decoy_admin
+      MemorySize: 128
+      Timeout: 3
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref HitsTable
+          TOPIC_ARN: !Ref AlertTopic
+
+  DecoyAdminUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref DecoyAdminFunction
+      AuthType: NONE
+
+  DecoyAdminUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DecoyAdminFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: '*'
+      FunctionUrlAuthType: NONE
+
+Outputs:
+  TableName:
+    Value: !Ref HitsTable
+  TopicArn:
+    Value: !Ref AlertTopic
+  AdminUrl:
+    Value: !GetAtt DecoyAdminUrl.FunctionUrl
