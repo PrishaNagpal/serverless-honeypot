@@ -116,4 +116,5 @@ def record_hit(table, sns, topic_arn, rec, now=None):
                 if not _is_conditional_failure(err):
                     raise
 
-        return {"new_visitor": new_visitor, "alert_reason": alerted_now}
+            return {"new_visitor": new_visitor, "rule": reason, "alert_reason": alerted_now}
+        
