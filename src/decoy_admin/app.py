@@ -1,8 +1,16 @@
 import base64
-import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from urllib.parse import parse_qs
+
+import boto3
+import honeypot_common as hc
+
+TABLE_NAME = os.environ.get("TABLE_NAME")
+TOPIC_ARN = os.environ.get("TOPIC_ARN")
+_table = boto3.resource("dynamodb").Table(TABLE_NAME) if TABLE_NAME else None
+_sns = boto3.client("sns") if TOPIC_ARN else None
 
 LOGIN_PAGE = """<html><head><title>Admin Login</title></head>
 <body><h2>Administrator Login</h2>
@@ -16,15 +24,11 @@ ERROR_PAGE = LOGIN_PAGE.replace(
 )
 
 
-def make_fingerprint(ip, user_agent, header_names):
-    raw = f"{ip}|{user_agent}|{','.join(sorted(header_names))}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
-
-
 def lambda_handler(event, context):
     http = event["requestContext"]["http"]
     headers = event.get("headers") or {}
     method = http["method"]
+    user_agent = headers.get("user-agent", "")[:200]
 
     body = event.get("body") or ""
     if event.get("isBase64Encoded"):
@@ -34,19 +38,24 @@ def lambda_handler(event, context):
     record = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "decoy": "admin",
-        "fingerprint": make_fingerprint(http["sourceIp"], headers.get("user-agent", ""), headers.keys()),
+        "fingerprint": hc.make_fingerprint(http["sourceIp"], user_agent),
         "ip": http["sourceIp"],
         "method": method,
-        "path": http["path"],
-        "user_agent": headers.get("user-agent", "")[:200],
+        "path": http["path"][:200],
+        "user_agent": user_agent,
         "username": form.get("username"),
         "password": form.get("password"),
     }
     print(json.dumps(record))
+
+    if _table is not None:
+        try:
+            hc.record_hit(_table, _sns, TOPIC_ARN, record)
+        except Exception as exc:
+            print(json.dumps({"error": str(exc)[:200]}))
 
     return {
         "statusCode": 401 if method == "POST" else 200,
         "headers": {"Content-Type": "text/html"},
         "body": ERROR_PAGE if method == "POST" else LOGIN_PAGE,
     }
-    

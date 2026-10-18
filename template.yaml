@@ -87,6 +87,14 @@ Resources:
     Properties:
       LogGroupName: /aws/lambda/honeypot-decoy-admin
       RetentionInDays: 14
+      
+  HoneypotLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: honeypot-common
+      Content: src/layer
+      CompatibleRuntimes:
+        - python3.12
 
   DecoyAdminFunction:
     Type: AWS::Lambda::Function
@@ -94,6 +102,8 @@ Resources:
     Properties:
       FunctionName: honeypot-decoy-admin
       Runtime: python3.12
+      Layers:
+        - !Ref HoneypotLayer
       Handler: app.lambda_handler
       Role: !GetAtt DecoyAdminRole.Arn
       Code: src/decoy_admin
