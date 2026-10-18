@@ -118,6 +118,14 @@ Resources:
       Principal: '*'
       FunctionUrlAuthType: NONE
 
+  DecoyAdminInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DecoyAdminFunction
+      Action: lambda:InvokeFunction
+      Principal: '*'
+      InvokedViaFunctionUrl: true
+
 Outputs:
   TableName:
     Value: !Ref HitsTable
