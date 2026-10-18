@@ -216,6 +216,87 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: '*'
       InvokedViaFunctionUrl: true
+  
+    DecoyApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: honeypot-decoy-api-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: decoy-api-permissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: WriteHits
+                Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt HitsTable.Arn
+              - Sid: AlertOnHit
+                Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref AlertTopic
+              - Sid: OwnLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/honeypot-decoy-api:*'
+
+  DecoyApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/honeypot-decoy-api
+      RetentionInDays: 14
+
+  DecoyApiFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: DecoyApiLogGroup
+    Properties:
+      FunctionName: honeypot-decoy-api
+      Runtime: python3.12
+      Layers:
+        - !Ref HoneypotLayer
+      Handler: app.lambda_handler
+      Role: !GetAtt DecoyApiRole.Arn
+      Code: src/decoy_api
+      MemorySize: 128
+      Timeout: 3
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref HitsTable
+          TOPIC_ARN: !Ref AlertTopic
+
+  DecoyApiUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref DecoyApiFunction
+      AuthType: NONE
+
+  DecoyApiUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DecoyApiFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: '*'
+      FunctionUrlAuthType: NONE
+
+  DecoyApiInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DecoyApiFunction
+      Action: lambda:InvokeFunction
+      Principal: '*'
+      InvokedViaFunctionUrl: true
 
 Outputs:
   TableName:
@@ -226,4 +307,6 @@ Outputs:
     Value: !GetAtt DecoyAdminUrl.FunctionUrl
   KeysUrl:
     Value: !GetAtt DecoyKeysUrl.FunctionUrl
+  ApiUrl:
+    Value: !GetAtt DecoyApiUrl.FunctionUrl
     
