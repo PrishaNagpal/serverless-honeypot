@@ -84,27 +84,36 @@ def record_hit(table, sns, topic_arn, rec, now=None):
         if count >= WINDOW_HITS:
             reason = f"{count} hits in {WINDOW_MINUTES} minutes"
 
-    # 4. alert at most once per visitor
-    alerted_now = None
-    if reason:
-        try:
-            table.update_item(
-                Key={"pk": fp, "sk": "PROFILE"},
-                UpdateExpression="SET alerted = :t",
-                ConditionExpression="alerted = :f",
-                ExpressionAttributeValues={":t": True, ":f": False},
-            )
-            sns.publish(
-                TopicArn=topic_arn,
-                Subject=f"Honeypot alert: {reason}",
-                Message=(
-                    f"Reason: {reason}\nDecoy: {decoy}\nPath: {rec.get('path')}\n"
-                    f"Visitor: {fp}\nUser agent: {rec.get('user_agent')}\nTime: {ts}"
-                ),
-            )
-            alerted_now = reason
-        except ClientError as err:
-            if not _is_conditional_failure(err):
-                raise
+       # 4. alert at most once per visitor
+        alerted_now = None
+        if reason:
+            try:
+                table.update_item(
+                    Key={"pk": fp, "sk": "PROFILE"},
+                    UpdateExpression="SET alerted = :t",
+                    ConditionExpression="alerted = :f",
+                    ExpressionAttributeValues={":t": True, ":f": False},
+                )
+                try:
+                    sns.publish(
+                        TopicArn=topic_arn,
+                        Subject=f"Honeypot alert: {reason}",
+                        Message=(
+                            f"Reason: {reason}\nDecoy: {decoy}\nPath: {rec.get('path')}\n"
+                            f"Visitor: {fp}\nUser agent: {rec.get('user_agent')}\nTime: {ts}"
+                        ),
+                    )
+                except Exception:
+                    # undo the flag so the next hit can try the alert again
+                    table.update_item(
+                        Key={"pk": fp, "sk": "PROFILE"},
+                        UpdateExpression="SET alerted = :f",
+                        ExpressionAttributeValues={":f": False},
+                    )
+                    raise
+                alerted_now = reason
+            except ClientError as err:
+                if not _is_conditional_failure(err):
+                    raise
 
-    return {"new_visitor": new_visitor, "alert_reason": alerted_now}
+        return {"new_visitor": new_visitor, "alert_reason": alerted_now}
