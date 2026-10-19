@@ -297,6 +297,77 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: '*'
       InvokedViaFunctionUrl: true
+  
+  DigestRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: honeypot-digest-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: digest-permissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadNewVisitors
+                Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub '${HitsTable.Arn}/index/new-visitors'
+              - Sid: SendDigest
+                Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref AlertTopic
+              - Sid: OwnLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/honeypot-digest:*'
+
+  DigestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/honeypot-digest
+      RetentionInDays: 14
+
+  DigestFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: DigestLogGroup
+    Properties:
+      FunctionName: honeypot-digest
+      Runtime: python3.12
+      Handler: app.lambda_handler
+      Role: !GetAtt DigestRole.Arn
+      Code: src/digest
+      MemorySize: 128
+      Timeout: 10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref HitsTable
+          TOPIC_ARN: !Ref AlertTopic
+
+  DigestSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: honeypot-daily-digest
+      ScheduleExpression: cron(55 23 * * ? *)
+      State: ENABLED
+      Targets:
+        - Id: digest
+          Arn: !GetAtt DigestFunction.Arn
+
+  DigestSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DigestFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DigestSchedule.Arn
 
 Outputs:
   TableName:
