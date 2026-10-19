@@ -50,9 +50,10 @@ def lambda_handler(event, context):
 
     if _table is not None:
         try:
-            hc.record_hit(_table, _sns, TOPIC_ARN, record)
+            result = hc.record_hit(_table, _sns, TOPIC_ARN, record)
+            print(json.dumps({"result": result}))
         except Exception as exc:
-            print(json.dumps({"error": str(exc)[:200]}))
+            print(json.dumps({"error": type(exc).__name__ + ": " + str(exc)[:200]})) 
 
     return {
         "statusCode": 401 if method == "POST" else 200,

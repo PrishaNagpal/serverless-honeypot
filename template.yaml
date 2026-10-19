@@ -440,6 +440,38 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: '*'
       InvokedViaFunctionUrl: true
+  
+  FloodAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: honeypot-flood
+      AlarmDescription: More than 300 Lambda invocations in 5 minutes across the account
+      Namespace: AWS/Lambda
+      MetricName: Invocations
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 300
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+
+  ThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: honeypot-throttled
+      AlarmDescription: Lambda rejected requests because the account concurrency limit was reached
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
 
 Outputs:
   TableName:
