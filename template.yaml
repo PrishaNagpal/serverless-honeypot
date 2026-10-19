@@ -369,6 +369,78 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt DigestSchedule.Arn
 
+  DashboardRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: honeypot-dashboard-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: dashboard-permissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadOnly
+                Effect: Allow
+                Action: dynamodb:Query
+                Resource:
+                  - !GetAtt HitsTable.Arn
+                  - !Sub '${HitsTable.Arn}/index/new-visitors'
+              - Sid: OwnLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/honeypot-dashboard:*'
+
+  DashboardLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/honeypot-dashboard
+      RetentionInDays: 14
+
+  DashboardFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: DashboardLogGroup
+    Properties:
+      FunctionName: honeypot-dashboard
+      Runtime: python3.12
+      Handler: app.lambda_handler
+      Role: !GetAtt DashboardRole.Arn
+      Code: src/dashboard
+      MemorySize: 128
+      Timeout: 10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref HitsTable
+
+  DashboardUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref DashboardFunction
+      AuthType: NONE
+
+  DashboardUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DashboardFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: '*'
+      FunctionUrlAuthType: NONE
+
+  DashboardInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DashboardFunction
+      Action: lambda:InvokeFunction
+      Principal: '*'
+      InvokedViaFunctionUrl: true
+
 Outputs:
   TableName:
     Value: !Ref HitsTable
@@ -380,4 +452,6 @@ Outputs:
     Value: !GetAtt DecoyKeysUrl.FunctionUrl
   ApiUrl:
     Value: !GetAtt DecoyApiUrl.FunctionUrl
+  DashboardUrl:
+    Value: !GetAtt DashboardUrl.FunctionUrl
     
